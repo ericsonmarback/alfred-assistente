@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import threading
 from datetime import datetime, timedelta
@@ -19,6 +20,7 @@ from typing import Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from flask import Flask
 from google import genai
 from google.auth.transport.requests import Request
 from google.genai import types
@@ -945,7 +947,26 @@ async def post_shutdown(application: Application) -> None:
         scheduler.shutdown(wait=False)
 
 
+flask_app = Flask(__name__)
+
+
+@flask_app.route("/")
+def health_check() -> str:
+    return "Alfred está online!"
+
+
+def run_web_server() -> None:
+    port = int(os.environ.get("PORT", 10000))
+    flask_app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
+
+
+def start_web_server() -> None:
+    server_thread = threading.Thread(target=run_web_server, daemon=True)
+    server_thread.start()
+
+
 def main() -> None:
+    start_web_server()
     get_calendar()
     application = (
         Application.builder()
