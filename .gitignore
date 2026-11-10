@@ -1,0 +1,27 @@
+# Arquivos de segredos e credenciais locais
+.env
+.env.*
+*.env
+credentials.json
+credentials*.json
+token.json
+token*.json
+client_secret*.json
+state.json
+state*.json
+
+# Ambientes virtuais e cache Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+env/
+
+# IDEs e logs
+.vscode/
+.idea/
+*.log
+.DS_Store
+Thumbs.db

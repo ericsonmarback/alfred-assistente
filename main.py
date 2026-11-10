@@ -13,6 +13,7 @@ import logging
 import os
 import re
 import threading
+import webbrowser
 from datetime import datetime, timedelta
 from enum import Enum
 from html import escape
@@ -209,17 +210,33 @@ def generate(contents: list[Any], schema: type[BaseModel]) -> BaseModel:
 
 
 def _save_token(creds: Credentials) -> None:
-    config.GOOGLE_TOKEN_FILE.write_text(creds.to_json(), encoding="utf-8")
+    try:
+        config.GOOGLE_TOKEN_FILE.write_text(creds.to_json(), encoding="utf-8")
+    except Exception as exc:
+        log.warning("Não foi possível salvar o arquivo %s: %s", config.GOOGLE_TOKEN_FILE.name, exc)
 
 
 def get_calendar():
     """Abre a Agenda e grava token.json para não pedir login de novo."""
     with _calendar_lock:
         creds: Credentials | None = _calendar.get("creds")
+
+        # 1. Tenta carregar credenciais diretamente da variável de ambiente GOOGLE_TOKEN_JSON (ideal para nuvem/Render)
+        token_env = os.environ.get("GOOGLE_TOKEN_JSON", "").strip()
+        if creds is None and token_env:
+            try:
+                token_data = json.loads(token_env)
+                creds = Credentials.from_authorized_user_info(token_data, config.CALENDAR_SCOPES)
+                log.info("Credenciais do Google Agenda carregadas com sucesso via GOOGLE_TOKEN_JSON.")
+            except Exception as exc:
+                log.warning("Falha ao processar variável GOOGLE_TOKEN_JSON: %s", exc)
+
+        # 2. Se não houver na variável, tenta carregar do arquivo local token.json
         if creds is None and config.GOOGLE_TOKEN_FILE.exists():
             creds = Credentials.from_authorized_user_file(
                 str(config.GOOGLE_TOKEN_FILE), config.CALENDAR_SCOPES
             )
+
         if creds and creds.valid:
             service = _calendar.get("service")
             if service is None:
@@ -227,6 +244,7 @@ def get_calendar():
                 _calendar["creds"] = creds
                 _calendar["service"] = service
             return service
+
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
             _save_token(creds)
@@ -238,8 +256,35 @@ def get_calendar():
             flow = InstalledAppFlow.from_client_secrets_file(
                 str(config.GOOGLE_CREDENTIALS_FILE), config.CALENDAR_SCOPES
             )
-            creds = flow.run_local_server(port=0, access_type="offline", prompt="consent")
+            try:
+                creds = flow.run_local_server(port=0, access_type="offline", prompt="consent")
+            except (webbrowser.Error, Exception) as exc:
+                auth_url, _ = flow.authorization_url(prompt="consent", access_type="offline")
+                msg = (
+                    "\n============================================================\n"
+                    "[AUTENTICAÇÃO GOOGLE AGENDA NECESSÁRIA]\n"
+                    "O navegador não pôde ser aberto automaticamente (ambiente em nuvem/Render).\n"
+                    "Copie o link abaixo e cole no navegador para autorizar:\n\n"
+                    f"{auth_url}\n\n"
+                    "DICA PARA O RENDER:\n"
+                    "1. Execute o bot uma vez na sua máquina local para gerar o arquivo 'token.json'.\n"
+                    "2. Abra o arquivo 'token.json', copie todo o conteúdo.\n"
+                    "3. No Render, crie uma variável de ambiente chamada GOOGLE_TOKEN_JSON\n"
+                    "   e cole esse conteúdo. Assim, o robô não dependerá de navegador na nuvem.\n"
+                    "============================================================\n"
+                )
+                print(msg)
+                log.error(msg)
+                if hasattr(flow, "run_console"):
+                    try:
+                        creds = flow.run_console(access_type="offline", prompt="consent")
+                    except Exception:
+                        raise exc
+                else:
+                    raise exc
+
             _save_token(creds)
+
         service = build("calendar", "v3", credentials=creds, cache_discovery=False)
         _calendar["creds"] = creds
         _calendar["service"] = service
