@@ -1011,6 +1011,16 @@ def start_web_server() -> None:
 
 
 def main() -> None:
+    # Garante que a MainThread tenha um event loop ativo no Python 3.12, 3.13 e 3.14+
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_closed():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
     start_web_server()
     get_calendar()
     application = (
